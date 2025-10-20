@@ -39,11 +39,8 @@ RUN wget -qO /usr/local/bin/yq \
     "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64" \
     && chmod +x /usr/local/bin/yq
 
-# Install oasdiff
-RUN wget -q https://github.com/Tufin/oasdiff/releases/latest/download/oasdiff_linux_amd64.tar.gz \
-    && tar xf oasdiff_linux_amd64.tar.gz \
-    && mv oasdiff /usr/local/bin/ \
-    && rm oasdiff_linux_amd64.tar.gz
+# Note: oasdiff installation skipped (requires Go toolchain or specific binary format)
+# It will be installed at workflow runtime in contract-validation.yml
 
 # Verify installations
 RUN semgrep --version \
@@ -52,7 +49,6 @@ RUN semgrep --version \
     && kubectl version --client \
     && kubeconform -v \
     && kube-score version \
-    && yq --version \
-    && oasdiff version
+    && yq --version
 
 USER runner
