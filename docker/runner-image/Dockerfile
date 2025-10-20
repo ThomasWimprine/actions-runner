@@ -40,8 +40,10 @@ RUN wget -qO /usr/local/bin/yq \
     && chmod +x /usr/local/bin/yq
 
 # Install oasdiff
-RUN curl -L https://github.com/Tufin/oasdiff/releases/latest/download/oasdiff_linux_amd64 -o /usr/local/bin/oasdiff \
-    && chmod +x /usr/local/bin/oasdiff
+RUN wget -q https://github.com/Tufin/oasdiff/releases/latest/download/oasdiff_linux_amd64.tar.gz \
+    && tar xf oasdiff_linux_amd64.tar.gz \
+    && mv oasdiff /usr/local/bin/ \
+    && rm oasdiff_linux_amd64.tar.gz
 
 # Verify installations
 RUN semgrep --version \
