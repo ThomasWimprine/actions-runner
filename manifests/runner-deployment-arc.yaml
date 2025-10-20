@@ -1,0 +1,123 @@
+apiVersion: actions.summerwind.dev/v1alpha1
+kind: RunnerDeployment
+metadata:
+  name: thomaswimprine-runners
+  namespace: actions-runner-system
+  labels:
+    app: thomaswimprine-runners
+    environment: development
+spec:
+  replicas: 4  # Scaled to 4 runners (resource-constrained Minikube)
+
+  template:
+    metadata:
+      labels:
+        app: thomaswimprine-runners
+        environment: development
+
+    spec:
+      # Init container to setup tool cache permissions
+      initContainers:
+        - name: setup-toolcache
+          image: busybox:1.36-uclibc
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              echo "Setting up tool cache directory..."
+              mkdir -p /opt/hostedtoolcache
+              chown -R 1000:1000 /opt/hostedtoolcache
+              chmod 755 /opt/hostedtoolcache
+              echo "Tool cache ready: $(ls -ld /opt/hostedtoolcache)"
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+                - FOWNER
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: tool-cache
+              mountPath: /opt/hostedtoolcache
+            - name: tmp-init
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "16Mi"
+            limits:
+              cpu: "100m"
+              memory: "64Mi"
+
+      # Organization-level runners for ThomasWimprine org
+      organization: ThomasWimprine
+
+      # Runner labels for workflow targeting
+      labels:
+        - self-hosted
+        - Linux
+        - X64
+        - minikube
+        - arc
+
+      # Explicitly disable DinD sidecar
+      dockerEnabled: false
+
+      # Environment variables
+      # We provide Docker access via DOCKER_HOST pointing to socket proxy
+      env:
+        - name: DISABLE_RUNNER_UPDATE
+          value: "true"
+        - name: DOCKER_HOST
+          value: "tcp://docker-socket-proxy:2375"  # Use proxy instead of socket
+
+      # Resource limits (same as before)
+      resources:
+        requests:
+          cpu: "1200m"
+          memory: "4Gi"
+        limits:
+          cpu: "1200m"
+          memory: "4Gi"
+
+      # Volume mounts for runner
+      volumeMounts:
+        - name: work
+          mountPath: /runner/_work
+        - name: tmp
+          mountPath: /tmp
+        - name: tool-cache
+          mountPath: /opt/hostedtoolcache
+
+      # Volumes
+      volumes:
+        - name: work
+          emptyDir:
+            sizeLimit: 10Gi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: tool-cache
+          emptyDir:
+            sizeLimit: 5Gi
+        - name: tmp-init
+          emptyDir: {}
+
+      # Use custom ServiceAccount with minimal RBAC
+      serviceAccountName: thomaswimprine-runners-sa
+
+      # Security context (pod-level only for ARC)
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault

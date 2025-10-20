@@ -1,0 +1,75 @@
+# Network Policy for ARC Runners
+# Implements least-privilege network access
+# - No ingress allowed (runners don't accept inbound connections)
+# - Egress restricted to DNS, HTTPS (GitHub API), and Docker socket proxy
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: runner-network-policy
+  namespace: actions-runner-system
+  labels:
+    app: thomaswimprine-runners
+    environment: development
+spec:
+  # Apply policy to runner pods only
+  podSelector:
+    matchLabels:
+      app: thomaswimprine-runners
+
+  # Enforce both ingress and egress policies
+  policyTypes:
+  - Ingress
+  - Egress
+
+  # No ingress allowed - runners don't need to accept connections
+  ingress: []
+
+  # Egress rules - allow only necessary traffic
+  egress:
+  # Rule 1: Allow DNS resolution (required for all network operations)
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+
+  # Rule 2: Allow HTTPS for GitHub API communication
+  # This includes:
+  # - Runner registration with GitHub
+  # - Job polling and status updates
+  # - Artifact uploads
+  # - Log streaming
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443
+
+  # Rule 3: Allow HTTP to GitHub (for redirects)
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 80
+
+  # Rule 4: Allow connection to Docker socket proxy (CRITICAL)
+  # Runners need this to execute Docker commands in CI jobs
+  - to:
+    - podSelector:
+        matchLabels:
+          app: docker-socket-proxy
+    ports:
+    - protocol: TCP
+      port: 2375
+
+  # All other egress traffic is DENIED by default
+  # This prevents:
+  # - Lateral movement to other pods
+  # - Data exfiltration to unauthorized endpoints
+  # - Access to cluster-internal services

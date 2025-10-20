@@ -1,0 +1,36 @@
+apiVersion: actions.summerwind.dev/v1alpha1
+kind: HorizontalRunnerAutoscaler
+metadata:
+  name: thomaswimprine-runners-homelab-autoscaler
+  namespace: actions-runner-system
+  labels:
+    app: thomaswimprine-runners
+    environment: production
+    cluster: homelab-test
+  annotations:
+    description: "Autoscales GitHub Actions runners on homelab-test Talos cluster (0-6 replicas)"
+spec:
+  # Target the RunnerDeployment to scale
+  scaleTargetRef:
+    kind: RunnerDeployment
+    name: thomaswimprine-runners-homelab
+
+  # Replica limits: Keep 1 runner minimum, scale to 8 max
+  # (minReplicas: 1 required for PercentageRunnersBusy to work with org-level runners)
+  minReplicas: 1
+  maxReplicas: 8
+
+  # Scaling metrics - using PercentageRunnersBusy (works for all org repos)
+  metrics:
+  - type: PercentageRunnersBusy
+    # Scale up when >75% of runners are busy
+    scaleUpThreshold: "0.75"
+    # Scale down when <25% of runners are busy
+    scaleDownThreshold: "0.25"
+    # Scale up by 2 runners at a time (faster response for production)
+    scaleUpAdjustment: 2
+    # Scale down by 1 runner at a time (gradual scale-down)
+    scaleDownAdjustment: 1
+
+  # Cooldown periods to prevent thrashing
+  scaleDownDelaySecondsAfterScaleOut: 300  # Wait 5min after scale-up before scale-down

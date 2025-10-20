@@ -1,0 +1,125 @@
+---
+# ServiceAccount for ARC GitHub Actions Runner
+# Principle of Least Privilege - minimal permissions only
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: thomaswimprine-runners-sa
+  namespace: actions-runner-system
+  labels:
+    app: github-actions-runner
+    security-profile: restricted
+  annotations:
+    description: "ServiceAccount for GitHub Actions Runner with minimal RBAC permissions"
+    security-review-date: "2025-10-12"
+    risk-level: "HIGH"
+automountServiceAccountToken: true
+
+---
+# Role with minimal permissions for runner operations
+# ONLY allows read operations on pods and configmaps in same namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: thomaswimprine-runners-role
+  namespace: actions-runner-system
+  labels:
+    app: github-actions-runner
+    security-profile: restricted
+  annotations:
+    description: "Minimal RBAC role for GitHub Actions Runner"
+    security-review-date: "2025-10-12"
+rules:
+  # Allow read-only access to pods in same namespace
+  # Required for runners to check their own status
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+
+  # Allow read-only access to configmaps
+  # Required for reading configuration data
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list"]
+
+  # Explicitly deny all other operations
+  # This is defensive - RBAC denies by default, but we document it
+  # - apiGroups: ["*"]
+  #   resources: ["*"]
+  #   verbs: ["create", "update", "patch", "delete", "deletecollection"]
+  #   # Note: Cannot explicitly deny in RBAC - this is documentation only
+
+---
+# RoleBinding connecting ServiceAccount to Role
+# Scoped to namespace only - no cluster-wide permissions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: thomaswimprine-runners-rolebinding
+  namespace: actions-runner-system
+  labels:
+    app: github-actions-runner
+    security-profile: restricted
+  annotations:
+    description: "Binds minimal role to runner ServiceAccount"
+    security-review-date: "2025-10-12"
+subjects:
+  - kind: ServiceAccount
+    name: thomaswimprine-runners-sa
+    namespace: actions-runner-system
+roleRef:
+  kind: Role
+  name: thomaswimprine-runners-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# NetworkPolicy - Additional security layer (optional but recommended)
+# Restricts network traffic to/from runner pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: thomaswimprine-runners-netpol
+  namespace: actions-runner-system
+  labels:
+    app: github-actions-runner
+    security-profile: restricted
+  annotations:
+    description: "Network isolation for GitHub Actions Runner"
+    security-review-date: "2025-10-12"
+spec:
+  podSelector:
+    matchLabels:
+      app: github-actions-runner
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Deny all ingress by default (no rules defined)
+    []
+  egress:
+    # Allow DNS resolution
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+    # Allow HTTPS to GitHub (required for Actions)
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 443
+    # Allow HTTP for package downloads
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 80
+    # Allow egress to container registries
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 5000

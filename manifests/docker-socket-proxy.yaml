@@ -1,0 +1,133 @@
+# Docker Socket Proxy Deployment
+# Provides filtered access to Docker socket for ARC runners
+# Security: Denies dangerous operations, allows only necessary APIs
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: docker-socket-proxy
+  namespace: actions-runner-system
+  labels:
+    app: docker-socket-proxy
+    environment: development
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: docker-socket-proxy
+  template:
+    metadata:
+      labels:
+        app: docker-socket-proxy
+        environment: development
+    spec:
+      # Pod-level security context
+      securityContext:
+        fsGroup: 999  # docker group on Minikube for socket access
+      containers:
+      - name: proxy
+        image: tecnativa/docker-socket-proxy:latest
+        imagePullPolicy: IfNotPresent
+
+        # Environment variables control which Docker APIs are allowed
+        env:
+        # Allow only necessary Docker APIs
+        - name: CONTAINERS
+          value: "1"
+        - name: IMAGES
+          value: "1"
+        - name: VOLUMES
+          value: "0"
+        - name: NETWORKS
+          value: "1"
+        - name: BUILD
+          value: "0"
+
+        # Enable POST for container/network creation (required for CI)
+        - name: POST
+          value: "1"
+        # Enable DELETE for cleanup (prevents resource exhaustion)
+        - name: DELETE
+          value: "1"
+        - name: SWARM
+          value: "0"
+        - name: SERVICES
+          value: "0"
+
+        ports:
+        - containerPort: 2375
+          protocol: TCP
+
+        volumeMounts:
+        - name: docker-sock
+          mountPath: /var/run/docker.sock
+          readOnly: true  # Critical: mount host socket read-only
+        - name: tmp
+          mountPath: /tmp  # HAProxy needs to write config here
+        - name: run
+          mountPath: /run  # HAProxy needs to write PID file here
+        - name: haproxy-state
+          mountPath: /var/lib/haproxy  # HAProxy state directory
+
+        # Security context - non-root, minimal capabilities
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65534  # nobody user
+          runAsGroup: 999  # docker group on Minikube
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+              - ALL
+          seccompProfile:
+            type: RuntimeDefault
+
+        # Resource limits to prevent DoS
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+
+      volumes:
+      # Mount host Docker socket - DEVELOPMENT ONLY
+      - name: docker-sock
+        hostPath:
+          path: /var/run/docker.sock
+          type: Socket
+      # Writable directories for HAProxy
+      - name: tmp
+        emptyDir: {}
+      - name: run
+        emptyDir: {}
+      - name: haproxy-state
+        emptyDir: {}
+
+      # Restart policy for high availability
+      restartPolicy: Always
+
+      # DNS policy
+      dnsPolicy: ClusterFirst
+
+---
+# Service to expose Docker socket proxy
+apiVersion: v1
+kind: Service
+metadata:
+  name: docker-socket-proxy
+  namespace: actions-runner-system
+  labels:
+    app: docker-socket-proxy
+    environment: development
+spec:
+  selector:
+    app: docker-socket-proxy
+  ports:
+  - name: docker-api
+    port: 2375
+    targetPort: 2375
+    protocol: TCP
+  type: ClusterIP
+  sessionAffinity: None

@@ -1,0 +1,196 @@
+# Updated ARC Runner Deployment with Explicit Docker Configuration
+# CRITICAL: This configuration is DEVELOPMENT ONLY - FORBIDDEN for production
+#
+# Key Changes:
+# 1. Explicit Docker configuration (prevents dind auto-injection)
+# 2. Docker socket proxy connection (not direct socket mount)
+# 3. Complete security contexts (pod and container level)
+# 4. Health probes for automatic recovery
+# 5. AppArmor security profile
+# 6. Pod Security Standards enforcement
+# 7. Split volumes for read-only filesystem
+# 8. Maximum 3 replicas (6-core host limitation)
+---
+apiVersion: actions.summerwind.dev/v1alpha1
+kind: RunnerDeployment
+metadata:
+  name: thomaswimprine-runners
+  namespace: actions-runner-system
+  labels:
+    app: thomaswimprine-runners
+    environment: development
+spec:
+  # Maximum 3 runners for 6-core host
+  # DO NOT increase - see PRP for capacity analysis
+  replicas: 3
+
+  template:
+    metadata:
+      labels:
+        app: thomaswimprine-runners
+        environment: development
+
+      annotations:
+        # AppArmor security profile - restricts dangerous syscalls
+        container.apparmor.security.beta.kubernetes.io/runner: localhost/arc-runner
+
+        # Pod Security Standards - enforce restricted profile
+        pod-security.kubernetes.io/enforce: restricted
+        pod-security.kubernetes.io/audit: restricted
+        pod-security.kubernetes.io/warn: restricted
+
+    spec:
+      # Organization-level runners for ThomasWimprine org
+      organization: ThomasWimprine
+
+      # Runner labels for workflow targeting
+      labels:
+        - self-hosted
+        - Linux
+        - X64
+        - minikube
+        - arc
+
+      # CRITICAL: Explicit Docker configuration
+      # Prevents ARC from auto-injecting dind sidecar
+      dockerEnabled: true
+      dockerdWithinRunnerContainer: false
+
+      # Pod-level security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+
+      # Environment variables for runner configuration
+      env:
+      # Prevent runner from updating during job execution
+      - name: DISABLE_RUNNER_UPDATE
+        value: "true"
+
+      # CRITICAL: Connect to Docker socket proxy (not direct socket)
+      # This filters dangerous Docker commands for security
+      - name: DOCKER_HOST
+        value: "tcp://docker-socket-proxy:2375"
+
+      # Resource limits
+      # Each runner needs 1.2 CPU + overhead = ~2 cores
+      # 3 runners × 2 cores = 6 cores (100% utilization on 6-core host)
+      resources:
+        limits:
+          cpu: "1200m"
+          memory: "4Gi"
+          ephemeral-storage: "10Gi"
+        requests:
+          cpu: "1200m"
+          memory: "4Gi"
+          ephemeral-storage: "10Gi"
+
+      # Container-level security context
+      # CRITICAL: These settings prevent privilege escalation
+      containerSecurityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+        seccompProfile:
+          type: RuntimeDefault
+
+      # Liveness probe - check runner is responsive
+      # If probe fails 3 times, pod is restarted
+      livenessProbe:
+        httpGet:
+          path: /healthz
+          port: 8080
+          scheme: HTTP
+        initialDelaySeconds: 60
+        periodSeconds: 30
+        timeoutSeconds: 10
+        successThreshold: 1
+        failureThreshold: 3
+
+      # Readiness probe - check runner can accept jobs
+      # If probe fails, pod is removed from service
+      readinessProbe:
+        httpGet:
+          path: /ready
+          port: 8080
+          scheme: HTTP
+        initialDelaySeconds: 30
+        periodSeconds: 10
+        timeoutSeconds: 5
+        successThreshold: 1
+        failureThreshold: 3
+
+      # Volume configuration
+      # Split into separate volumes to enforce read-only root filesystem
+      volumeMounts:
+      # Work directory for build artifacts
+      - name: work
+        mountPath: /runner/_work
+        readOnly: false
+
+      # Temporary directory for runtime files
+      - name: tmp
+        mountPath: /tmp
+        readOnly: false
+
+      # Runner home directory
+      - name: runner-home
+        mountPath: /runner
+        readOnly: false
+
+      # Volume definitions - all ephemeral (no persistent storage)
+      volumes:
+      # Work volume - stores build artifacts during job execution
+      - name: work
+        emptyDir:
+          sizeLimit: 10Gi
+
+      # Temporary volume - stores temporary files
+      - name: tmp
+        emptyDir:
+          sizeLimit: 1Gi
+
+      # Runner home volume - stores runner configuration
+      - name: runner-home
+        emptyDir:
+          sizeLimit: 2Gi
+
+      # Service account with minimal RBAC permissions
+      serviceAccountName: thomaswimprine-runners-sa
+      automountServiceAccountToken: true
+
+      # Scheduling constraints
+      # Prefer spreading runners across nodes (when multi-node available)
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - thomaswimprine-runners
+              topologyKey: kubernetes.io/hostname
+
+      # Tolerations for development environment
+      # Allow scheduling on control-plane node if needed
+      tolerations:
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+
+      # DNS policy
+      dnsPolicy: ClusterFirst
+
+      # Restart policy
+      restartPolicy: Always

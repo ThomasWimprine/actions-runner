@@ -1,0 +1,36 @@
+apiVersion: actions.summerwind.dev/v1alpha1
+kind: HorizontalRunnerAutoscaler
+metadata:
+  name: thomaswimprine-runners-autoscaler
+  namespace: actions-runner-system
+  labels:
+    app: thomaswimprine-runners
+    environment: development
+    cluster: minikube
+  annotations:
+    description: "Autoscales GitHub Actions runners on Minikube cluster (0-2 replicas)"
+spec:
+  # Target the RunnerDeployment to scale
+  scaleTargetRef:
+    kind: RunnerDeployment
+    name: thomaswimprine-runners
+
+  # Replica limits: Keep 1 runner minimum, scale to 2 max
+  # (minReplicas: 1 required for PercentageRunnersBusy to work with org-level runners)
+  minReplicas: 1
+  maxReplicas: 2
+
+  # Scaling metrics - using PercentageRunnersBusy (works for all org repos)
+  metrics:
+  - type: PercentageRunnersBusy
+    # Scale up when >75% of runners are busy
+    scaleUpThreshold: "0.75"
+    # Scale down when <25% of runners are busy
+    scaleDownThreshold: "0.25"
+    # Scale up by 1 runner at a time
+    scaleUpAdjustment: 1
+    # Scale down by 1 runner at a time
+    scaleDownAdjustment: 1
+
+  # Cooldown periods to prevent thrashing
+  scaleDownDelaySecondsAfterScaleOut: 300  # Wait 5min after scale-up before scale-down

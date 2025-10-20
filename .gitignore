@@ -1,0 +1,30 @@
+# Actions Runner specific files
+.credentials
+.credentials_rsaparams
+.env
+.runner
+.path
+_diag/
+_work/
+*.tar.gz
+bin/
+bin.*/
+externals/
+
+# Logs
+logs/*.log
+security/audit-reports/*.log
+security/audit-reports/*.html
+
+# Backup files (too large for Git)
+backups/*.yaml
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
